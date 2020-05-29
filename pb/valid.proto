@@ -3,7 +3,7 @@ syntax = "proto3";
 package valid;
 
 import "google/protobuf/descriptor.proto";
-option go_package = "./pb";
+option go_package = "./pb;valid";
 
 //To be Extended with more custom validators
 extend google.protobuf.FieldOptions {

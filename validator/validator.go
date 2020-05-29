@@ -17,7 +17,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Sainarasimhan/go-validator/pb"
+	valid "github.com/Sainarasimhan/go-validator/pb"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/protobuf/proto"
@@ -28,11 +28,16 @@ import (
 type violation = errdetails.BadRequest_FieldViolation
 type violations = []*errdetails.BadRequest_FieldViolation
 
+type validator struct {
+	vlist violations
+	max   int
+}
+
 //GetViolations - Get Request violiations from proto Message
-func GetViolations(msg protoreflect.Message) violations {
+func GetViolations(msg protoreflect.Message, max int) violations {
 
 	var (
-		vlist  violations
+		vld    = validator{max: max}
 		err    error
 		fields = msg.Descriptor().Fields()
 	)
@@ -41,7 +46,7 @@ func GetViolations(msg protoreflect.Message) violations {
 		desc := fields.Get(i)
 		values := msg.Get(desc)
 		opts := desc.Options().(*descriptorpb.FieldOptions)
-		req := proto.GetExtension(opts, pb.E_Required).(bool)
+		req := proto.GetExtension(opts, valid.E_Required).(bool)
 
 		switch desc.Kind() {
 		case protoreflect.MessageKind:
@@ -50,13 +55,13 @@ func GetViolations(msg protoreflect.Message) violations {
 					iv := values.List()
 					for i := 0; i < iv.Len(); i++ {
 						va := iv.Get(i)
-						if vlist, err = verifyMessage(vlist, va); err != nil {
-							return vlist
+						if err = vld.verifyMessage(va); err != nil {
+							return vld.vlist
 						}
 					}
 				} else {
-					if vlist, err = verifyMessage(vlist, values); err != nil {
-						return vlist
+					if err = vld.verifyMessage(values); err != nil {
+						return vld.vlist
 					}
 				}
 			}
@@ -64,7 +69,7 @@ func GetViolations(msg protoreflect.Message) violations {
 		case protoreflect.StringKind:
 			var vptr *violation
 
-			allowedList := proto.GetExtension(opts, pb.E_Allowed).(*pb.StringList)
+			allowedList := proto.GetExtension(opts, valid.E_Allowed).(*valid.StringList)
 			if req && (len(values.String()) == 0) {
 				vptr = mandatoryViolation(desc.FullName())
 			}
@@ -77,8 +82,8 @@ func GetViolations(msg protoreflect.Message) violations {
 				}
 			} else if len(values.String()) != 0 {
 
-				min := proto.GetExtension(opts, pb.E_Lmin).(int32)
-				max := proto.GetExtension(opts, pb.E_Lmax).(int32)
+				min := proto.GetExtension(opts, valid.E_Lmin).(int32)
+				max := proto.GetExtension(opts, valid.E_Lmax).(int32)
 
 				if (min != 0 && len(values.String()) < int(min)) ||
 					(max != 0 && len(values.String()) > int(max)) {
@@ -91,8 +96,8 @@ func GetViolations(msg protoreflect.Message) violations {
 				}
 			}
 
-			if vlist, err = appendViolations(vlist, vptr); err != nil {
-				return vlist
+			if err = vld.appendViolations(vptr); err != nil {
+				return vld.vlist
 			}
 
 		case protoreflect.Int32Kind:
@@ -101,7 +106,7 @@ func GetViolations(msg protoreflect.Message) violations {
 			if req && values.Int() == 0 {
 				vptr = mandatoryViolation(desc.FullName())
 			} else if values.Int() != 0 {
-				min, max := proto.GetExtension(opts, pb.E_Min).(int32), proto.GetExtension(opts, pb.E_Max).(int32)
+				min, max := proto.GetExtension(opts, valid.E_Min).(int32), proto.GetExtension(opts, valid.E_Max).(int32)
 				if (min != 0 && values.Int() < int64(min)) || (max != 0 && values.Int() > int64(max)) {
 					vptr = &violation{
 						Field:       fmt.Sprintf("%s", desc.Name()),
@@ -110,43 +115,43 @@ func GetViolations(msg protoreflect.Message) violations {
 
 				}
 			}
-			if vlist, err = appendViolations(vlist, vptr); err != nil {
-				return vlist
+			if err = vld.appendViolations(vptr); err != nil {
+				return vld.vlist
 			}
 		} // switch on descriptor kind
 	} // for loop
-	return vlist
+	return vld.vlist
 }
 
-func verifyMessage(vl violations, v protoreflect.Value) (violations, error) {
+func (vld *validator) verifyMessage(v protoreflect.Value) error {
 	var (
 		err error
 	)
 	if v.Message().IsValid() {
-		vt := GetViolations(v.Message())
-		if vl, err = appendViolations(vl, vt...); err != nil {
-			return vl, err
+		vt := GetViolations(v.Message(), 5)
+		if vld.appendViolations(vt...); err != nil {
+			return err
 		}
 	} else {
 		v := mandatoryViolation(v.Message().Descriptor().FullName())
-		if vl, err = appendViolations(vl, v); err != nil {
-			return vl, err
+		if err = vld.appendViolations(v); err != nil {
+			return err
 		}
 	}
-	return vl, nil
+	return nil
 }
 
-func appendViolations(vl violations, v ...*violation) (violations, error) {
+func (vld *validator) appendViolations(v ...*violation) error {
 	var err error
 	for _, val := range v {
 		if val != nil {
-			vl = append(vl, val)
-			if len(vl) > 3 {
+			vld.vlist = append(vld.vlist, val)
+			if len(vld.vlist) > vld.max {
 				err = errors.New("Max Violations reached")
 			}
 		}
 	}
-	return vl, err
+	return err
 }
 
 func mandatoryViolation(f protoreflect.FullName) *violation {
