@@ -100,8 +100,7 @@ func GetViolations(msg protoreflect.Message, max int) violations {
 				return vld.vlist
 			}
 
-		case protoreflect.Int32Kind:
-		case protoreflect.Int64Kind:
+		case protoreflect.Int32Kind,protoreflect.Int64Kind:
 			var vptr *violation
 			if req && values.Int() == 0 {
 				vptr = mandatoryViolation(desc.FullName())
